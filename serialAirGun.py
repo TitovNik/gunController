@@ -258,27 +258,7 @@ def Redraw(arr):
     fig.canvas.draw()
 
 
-def GetMaxFileNumber():
-    """
-    Get filename 'shotxxx' with maximum number.
-    Выполняется один раз в начале программы
 
-    :return: maxNum: максимальный номер shot в корневой папке
-    """
-    # global freeSpace
-    if freeSpace < 1000000:
-        print('Free disk space is low. Only 1 file to save')
-        return 1
-
-    maxNum = 0
-    files = os.listdir()
-    for file in files:
-        if 'shot' in file:
-            i = int(file[15:].split('.')[0])
-            if i > maxNum:
-                maxNum = i
-    maxNum += 1
-    return maxNum
 
 
 def Parse1(inData):
@@ -372,15 +352,16 @@ def CheckSerial():
 
         inData = inData[16:]
         arr = Parse1(inData[:dataSize])
-        ftime = datetime.datetime.now().strftime("%j_%H%M%S")
-        filename = ftime + "_shot%d.txt" % maxN
+        filename = datetime.datetime.now().strftime("%j_%H%M%S") + '.txt'  # + "_shot%d.txt" % maxN
 
-        # global freeSpace
         if freeSpace >= 1000000:
-            maxN += 1
+            savetxt(filename, arr, fmt="%d")
+            print('Data saved as:', filename)
+        else:
+            savetxt('temp.txt', arr, fmt="%d")
+            print('Free disk space is low. Only 1 file to save\nData saved as:temp.txt')
 
-        savetxt(filename, arr, fmt="%d")
-        print('Data saved as:', filename)
+
         inData = inData[dataSize:]
         # Визуализация сигнала
         Redraw(arr)
@@ -469,15 +450,14 @@ def change_delay(arr):
             filt_low.append(0)
         for i in range(5, len(signal_array) - 5):  # ширина фильтра
             filt_low[i] = 1
+        # Про подбор окна для фильтрации частот. В фаст_фурье_трансформ длину трасы можно принимать за 1 секунду.
+        # Соответственно помеха, повторяющаяся 5 раз на всем сигнале будет фильтроваться частотой в 5 Гц(эту цифру надо
+        # вписывать в строку выше
         sigfft_low = sp.fft.fft(signal_array[:, 0])
         for i in range(len(signal_array)):
             sigfft_low[i] *= filt_low[i]
         sigres_low = sp.fft.ifft(sigfft_low).real
         maxvalueid = sigres_low[min_time_ms10:min_time_ms10 + window_width10].argmax()
-
-        # Кароч, про подбор окна для фильтрации частот. В фаст_фурье_трансформ длину трасы можно принимать за 1 секунду.
-        # Соответственно помеха, повторяющаяся 5 раз на всем сигнале будет фильтроваться частотой в 5 Гц(эту цифру надо
-        # вписывать в строку выше (там где "ин рендж")
 
         filt = []  # сглаживание
         for i in range(len(signal_array)):
@@ -625,8 +605,6 @@ def Apply_changes():
 
 # Open port
 port = serial.Serial(portName, portSpeed)
-
-maxN = GetMaxFileNumber()
 
 # Prepare for drawing Tk + matplotlib
 matplotlib.use('TkAgg')  # This defines the Python GUI backend to use for matplotlib
