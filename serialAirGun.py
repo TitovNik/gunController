@@ -8,7 +8,6 @@ from array import array
 
 import serial
 import serial.tools.list_ports
-import msvcrt
 import struct
 import shutil
 import crcmod
@@ -17,13 +16,10 @@ import tkinter as tk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 
-import numpy
-from numpy import arange, savetxt
-from pylab import *
-import pandas as pd
-
 import scipy as sp
 import scipy.fft
+import numpy as np
+from pylab import *
 
 # =========================== НАСТРОЙКИ ==========================================
 
@@ -47,7 +43,6 @@ Nround = 5  # Количество отсчетов для округления 
 # ================================================================================
 
 # Variables
-# maxN = 0               # Number of next dump file
 inData = b''  # Incoming serial data
 root = tk.Tk()  # Tkinter window
 freeSpace = shutil.disk_usage('/').free  # Free space on disk
@@ -115,15 +110,15 @@ def SaveLog(data):
     :param data: данные
     :return: LogFile to directory
     """
-    try:
-        file = open('LOGFile.txt')
-    except IOError as e:
-        Log = open("LOGFile.txt", "a")
-        Log.write('date hour minute second chMsk samples samplingPeriod delay1 delay2 pick1 pick2\n')
-        Log.write(data)
+    if "LOGFile.txt" in os.listdir():
+        with open("LOGFile.txt", "a") as Log:
+            Log.write(data)
     else:
-        Log = open("LOGFile.txt", "a")
-        Log.write(data)
+        with open("LOGFile.txt", "a") as Log:
+            headers = ['date', 'hour', 'minute', 'second', 'chMsk', 'samples',
+                       'samplingPeriod', 'delay1', 'delay2', 'pick1', 'pick2\n']
+            Log.write('\t'.join(headers))
+            Log.write(data)
 
 
 def Send(data):
@@ -169,9 +164,8 @@ def SendSetup(channelMask=CHANNEL_MASK, samples=SAMPLES, samplingPeriod=SAMPLING
         print('nSamples set to ', samples)
     data = struct.pack("=HHHHLL", 1, channelMask, samples, samplingPeriod, delay1, delay2)
     SaveCommand(b"[[SendSetup]]")
-    nowtime = datetime.datetime.now().strftime("%j %H %M %S")
-    SaveLog(f'{nowtime} {channelMask} {samples} {samplingPeriod} {delay1} {delay2} '
-            f'{PickList1} {PickList2}\n')
+    nowTime = datetime.datetime.now().strftime("%j %H %M %S")
+    SaveLog(f'{nowTime}\t{channelMask}\t{samples}\t{samplingPeriod}\t{delay1}\t{delay2}\t{PickList1}\t{PickList2}\n')
     Send(data)
 
 
@@ -216,7 +210,7 @@ def Redraw(arr):
         for i in range(2, len(j) - 2):
             j[i] = (j[i - 2] + j[i - 1] + j[i] + j[i + 1] + j[i + 2]) / 5
 
-    t = arange(0, len(VCC1) / 10, 0.1)
+    t = np.arange(0, len(VCC1) / 10, 0.1)
 
     fig.clf()  # clear figure
 
@@ -302,7 +296,6 @@ def CheckSerial():
     global root
     global inData
     global port
-    global maxN
 
     root.after(100, CheckSerial)  # Periodic callback
 
@@ -355,12 +348,11 @@ def CheckSerial():
         filename = datetime.datetime.now().strftime("%j_%H%M%S") + '.txt'  # + "_shot%d.txt" % maxN
 
         if freeSpace >= 1000000:
-            savetxt(filename, arr, fmt="%d")
+            np.savetxt(filename, arr, fmt="%d")
             print('Data saved as:', filename)
         else:
-            savetxt('temp.txt', arr, fmt="%d")
+            np.savetxt('temp.txt', arr, fmt="%d")
             print('Free disk space is low. Only 1 file to save\nData saved as:temp.txt')
-
 
         inData = inData[dataSize:]
         # Визуализация сигнала
@@ -380,9 +372,9 @@ def CheckSerial():
 
         #  добавление в список для округления задержки, расчет значения DELAY
         if PickList1:
-            DELAY1 = int(INP_DELAY * 1000) + round(numpy.mean(PickList1))
+            DELAY1 = int(INP_DELAY * 1000) + round(np.mean(PickList1))
         if PickList2:
-            DELAY2 = int(INP_DELAY * 1000) + round(numpy.mean(PickList2))
+            DELAY2 = int(INP_DELAY * 1000) + round(np.mean(PickList2))
 
         #  установка границ задержки
         if DELAY1 < 0:
@@ -577,7 +569,7 @@ def Reconnect():
     port = serial.Serial(portName, portSpeed)
 
 
-def Apply_changes():
+def Apply_changes(var1, var2, delay, nround, SW_start, SW_length):
     """
     Применение настроек, введенных пользователем
     """
@@ -603,56 +595,64 @@ def Apply_changes():
     print('Changes Applied')
 
 
+def drawWindow():
+    # Prepare for drawing Tk + matplotlib
+    matplotlib.use('TkAgg')  # This defines the Python GUI backend to use for matplotlib
+    fig = plt.figure(figsize=(16, 8))  # Initialize matplotlib figure for graphing purposes #TODO обсудить размеры окна
+    canvas = FigureCanvasTkAgg(fig, master=root)  # Special type of "canvas" to allow for matplotlib graphing
+    plot_widget = canvas.get_tk_widget()
+    plot_widget.grid(row=0, column=0, columnspan=16)  # Add the plot to the tkinter widget
+
+    # create buttons
+    tk.Button(root, text="Start", command=lambda x=1: SendControl(x)).grid(row=1, column=0,
+                                                                           sticky='nesw')
+    tk.Button(root, text="Stop", command=lambda x=0: SendControl(x)).grid(row=1, column=1,
+                                                                          sticky='nesw')
+    tk.Button(root, text="Fire", command=lambda x=0xFE: SendControl(x)).grid(row=1, column=2,
+                                                                             sticky='nesw')
+    tk.Button(root, text="Exit", command=Exit).grid(row=1, column=3, sticky='nesw')
+
+    # Delays input
+    delay = tk.StringVar(value=str(INP_DELAY))
+    del1 = tk.StringVar(value=str(DELAY1))
+    del2 = tk.StringVar(value=str(DELAY2))
+
+    tk.Label(root, text='Delay\n ms').grid(row=1, column=5, sticky='s')
+    tk.Spinbox(root, width=5, textvariable=delay, from_=0, to=1000).grid(row=2, column=5, sticky='s')
+    tk.Label(root, text='Delay 1ch\n ms').grid(row=1, column=12, sticky='s')
+    tk.Entry(root, width=5, textvariable=del1, state='disabled').grid(row=2, column=12, sticky='s')
+    tk.Label(root, text='Delay 2ch\n ms').grid(row=1, column=13, sticky='s')
+    tk.Entry(root, width=5, textvariable=del2, state='disabled').grid(row=2, column=13, sticky='s')
+
+    # Search pick input
+    SW_start = tk.StringVar(value=str(min_time_ms))
+    SW_length = tk.StringVar(value=str(window_width))
+    nround = tk.StringVar(value=str(Nround))
+    tk.Label(root, text='Search window,\n start, ms').grid(row=1, column=6, sticky='s')
+    tk.Spinbox(root, width=5, textvariable=SW_start, from_=0, to=1000).grid(row=2, column=6, sticky='s')
+    tk.Label(root, text='Search window,\n width, ms').grid(row=1, column=7, sticky='s')
+    tk.Spinbox(root, width=5, textvariable=SW_length, from_=0, to=1000).grid(row=2, column=7, sticky='s')
+    tk.Label(root, text='Round search pick,\n frame').grid(row=1, column=8, sticky='s')
+    tk.Spinbox(root, width=5, textvariable=nround, from_=0, to=1000).grid(row=2, column=8, sticky='s')
+
+
+
+    # Channels check-buttons
+    var1 = tk.IntVar(value=1)
+    var2 = tk.IntVar(value=0)
+    tk.Checkbutton(root, variable=var1, text='Channel1', onvalue=1, offvalue=0).grid(row=2, column=0, sticky='nesw')
+    tk.Checkbutton(root, variable=var2, text='Channel2', onvalue=1, offvalue=0).grid(row=2, column=2, sticky='nesw')
+
+    tk.Button(root,
+              text='Apply Changes',
+              command=lambda: Apply_changes(var1, var2, delay, nround, SW_start, SW_length)
+              ).grid(row=1, column=15, sticky='nesw')
+
+
 # Open port
 port = serial.Serial(portName, portSpeed)
 
-# Prepare for drawing Tk + matplotlib
-matplotlib.use('TkAgg')  # This defines the Python GUI backend to use for matplotlib
-fig = plt.figure(figsize=(16, 8))  # Initialize matplotlib figure for graphing purposes #TODO обсудить размеры окна
-canvas = FigureCanvasTkAgg(fig, master=root)  # Special type of "canvas" to allow for matplotlib graphing
-plot_widget = canvas.get_tk_widget()
-plot_widget.grid(row=0, column=0, columnspan=16)  # Add the plot to the tkinter widget
-
-# create buttons
-tk.Button(root, text="Start", command=lambda x=1: SendControl(x)).grid(row=1, column=0,
-                                                                       sticky='nesw')
-tk.Button(root, text="Stop", command=lambda x=0: SendControl(x)).grid(row=1, column=1,
-                                                                      sticky='nesw')
-tk.Button(root, text="Fire", command=lambda x=0xFE: SendControl(x)).grid(row=1, column=2,
-                                                                         sticky='nesw')
-tk.Button(root, text="Exit", command=Exit).grid(row=1, column=3, sticky='nesw')
-
-# Delays input
-delay = tk.StringVar(value=str(INP_DELAY))
-del1 = tk.StringVar(value=str(DELAY1))
-del2 = tk.StringVar(value=str(DELAY2))
-
-tk.Label(root, text='Delay\n ms').grid(row=1, column=5, sticky='s')
-tk.Spinbox(root, width=5, textvariable=delay, from_=0, to=1000).grid(row=2, column=5, sticky='s')
-tk.Label(root, text='Delay 1ch\n ms').grid(row=1, column=12, sticky='s')
-tk.Entry(root, width=5, textvariable=del1, state='disabled').grid(row=2, column=12, sticky='s')
-tk.Label(root, text='Delay 2ch\n ms').grid(row=1, column=13, sticky='s')
-tk.Entry(root, width=5, textvariable=del2, state='disabled').grid(row=2, column=13, sticky='s')
-
-# Search pick input
-SW_start = tk.StringVar(value=str(min_time_ms))
-SW_length = tk.StringVar(value=str(window_width))
-nround = tk.StringVar(value=str(Nround))
-tk.Label(root, text='Search window,\n start, ms').grid(row=1, column=6, sticky='s')
-tk.Spinbox(root, width=5, textvariable=SW_start, from_=0, to=1000).grid(row=2, column=6, sticky='s')
-tk.Label(root, text='Search window,\n width, ms').grid(row=1, column=7, sticky='s')
-tk.Spinbox(root, width=5, textvariable=SW_length, from_=0, to=1000).grid(row=2, column=7, sticky='s')
-tk.Label(root, text='Round search pick,\n frame').grid(row=1, column=8, sticky='s')
-tk.Spinbox(root, width=5, textvariable=nround, from_=0, to=1000).grid(row=2, column=8, sticky='s')
-
-tk.Button(root, text='Apply Changes', command=Apply_changes).grid(row=1, column=15, sticky='nesw')
-
-# Channels check-buttons
-var1 = tk.IntVar(value=1)
-var2 = tk.IntVar(value=0)
-tk.Checkbutton(root, variable=var1, text='Channel1', onvalue=1, offvalue=0).grid(row=2, column=0, sticky='nesw')
-tk.Checkbutton(root, variable=var2, text='Channel2', onvalue=1, offvalue=0).grid(row=2, column=2, sticky='nesw')
-
+drawWindow()
 # send start commands
 SendSetup()
 SendControl(1)
